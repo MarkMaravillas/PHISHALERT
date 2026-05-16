@@ -1,5 +1,7 @@
 using System;
 using System.Drawing;
+using System.Net;        // fNetworkCredential
+using System.Net.Mail;   // for MailMessage and SmtpClient
 using System.Windows.Forms;
 
 namespace PHISHALERT
@@ -20,6 +22,8 @@ namespace PHISHALERT
         private Label lblLogin;
         private Panel pnlSignUpContainer;
         private Panel pnlForm;
+        private string generatedOTP;
+        private DateTime otpExpiry;
 
         public SignUpPage()
         {
@@ -218,22 +222,130 @@ namespace PHISHALERT
 
         private void btnSignUp_Click(object sender, EventArgs e)
         {
-            // Mock authentication - set logged in state and navigate to dashboard
-            var mainForm = this.FindForm() as Form1;
-            if (mainForm != null)
+            // Validate all fields are filled
+            if (string.IsNullOrWhiteSpace(txtUsername.Text))
             {
-                mainForm.SetLoggedIn(true);
-                mainForm.ShowDashboard();
+                MessageBox.Show("Please enter a username.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtUsername.Focus();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(txtEmail.Text))
+            {
+                MessageBox.Show("Please enter an email address.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtEmail.Focus();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(txtPassword.Text))
+            {
+                MessageBox.Show("Please enter a password.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtPassword.Focus();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(txtConfirmPassword.Text))
+            {
+                MessageBox.Show("Please confirm your password.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtConfirmPassword.Focus();
+                return;
+            }
+
+            // Validate that passwords match
+            if (txtPassword.Text != txtConfirmPassword.Text)
+            {
+                MessageBox.Show("Passwords do not match. Please re-enter your password and confirmation.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtPassword.Clear();
+                txtConfirmPassword.Clear();
+                txtPassword.Focus();
+                return;
+            }
+
+            // 1. Generate the unique 6-digit code
+            generatedOTP = GenerateOTP();
+
+            // 2. Set an expiration window of exactly 5 minutes from right now
+            otpExpiry = DateTime.Now.AddMinutes(5);
+
+            // 3. Send the code directly to the email typed in your text box
+            SendOTPEmail(txtEmail.Text, generatedOTP);
+
+            // 4. Open your new verification popup window modally (pass email for resend functionality)
+            using (OtpVerificationForm otpForm = new OtpVerificationForm(generatedOTP, otpExpiry, txtEmail.Text))
+            {
+                otpForm.ShowDialog();
+
+                // 5. Check if they successfully matched the code inside the form
+                if (otpForm.IsVerified)
+                {
+                    MessageBox.Show("Account created successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    // Navigate to the main application dashboard
+                    var mainForm = this.FindForm() as Form1;
+                    if (mainForm != null)
+                    {
+                        mainForm.SetLoggedIn(true);
+                        mainForm.ShowDashboard();
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("Registration incomplete. You must verify your email address to continue.", "Verification Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
         }
 
         private void lblLogin_Click(object sender, EventArgs e)
         {
-            // Navigate to Login page
             var mainForm = this.FindForm() as Form1;
             if (mainForm != null)
             {
                 mainForm.ShowLogin();
+            }
+        }
+
+
+        private string GenerateOTP()
+        {
+            Random rnd = new Random();
+            return rnd.Next(100000, 999999).ToString();
+        }
+
+        private void SendOTPEmail(string email, string otp)
+        {
+            try
+            {
+                MailMessage mail = new MailMessage();
+
+                // email test account
+                mail.From = new MailAddress("phishalert.otp.test@gmail.com", "PhishAlert Security");
+                mail.To.Add(email);
+                mail.Subject = "PhishAlert OTP Verification";
+
+                mail.IsBodyHtml = true;
+                mail.Body = $@"
+                    <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; max-width: 500px;'>
+                        <h2 style='color: #654321;'>PhishAlert Verification</h2>
+                        <p>Use the following code to complete your registration:</p>
+                        <div style='font-size: 24px; font-weight: bold; background-color: #f5ebe4; padding: 10px; text-align: center; margin: 20px 0;'>
+                            {otp}
+                        </div>
+                        <p style='color: #888; font-size: 12px;'>This code expires in 5 minutes.</p>
+                    </div>";
+
+                SmtpClient smtp = new SmtpClient("smtp.gmail.com");
+                smtp.Port = 587;
+
+                // email and 16 character google app password
+                smtp.Credentials = new NetworkCredential("phishalert.otp.test@gmail.com", "rcetlqnmdwyjxtmn");
+                smtp.EnableSsl = true;
+
+                smtp.Send(mail);
+                MessageBox.Show("OTP code has been sent successfully!", "Email Dispatched", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Email failed to send: " + ex.Message, "SMTP Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }
