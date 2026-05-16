@@ -1,8 +1,11 @@
 using System;
 using System.Drawing;
-using System.Net;        // fNetworkCredential
+using System.Net;        // for NetworkCredential
 using System.Net.Mail;   // for MailMessage and SmtpClient
+using System.Text.RegularExpressions; // For email validation
 using System.Windows.Forms;
+using Microsoft.Data.SqlClient; // For SQL Server connectivity
+using BCrypt.Net;               // For password hashing
 
 namespace PHISHALERT
 {
@@ -237,6 +240,23 @@ namespace PHISHALERT
                 return;
             }
 
+            // Validate email format and domain
+            if (!IsValidEmail(txtEmail.Text))
+            {
+                MessageBox.Show("Please enter a valid email address.", "Invalid Email", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtEmail.Focus();
+                return;
+            }
+
+            // Block test/invalid emails
+            if (IsTestOrBlockedEmail(txtEmail.Text))
+            {
+                MessageBox.Show("This email address cannot be used. Please use a valid personal or business email address.", "Invalid Email", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtEmail.Clear();
+                txtEmail.Focus();
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(txtPassword.Text))
             {
                 MessageBox.Show("Please enter a password.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -261,6 +281,7 @@ namespace PHISHALERT
                 return;
             }
 
+            // --- OPT VALIDATION & EMAIL GENERATION ---
             // 1. Generate the unique 6-digit code
             generatedOTP = GenerateOTP();
 
@@ -270,7 +291,7 @@ namespace PHISHALERT
             // 3. Send the code directly to the email typed in your text box
             SendOTPEmail(txtEmail.Text, generatedOTP);
 
-            // 4. Open your new verification popup window modally (pass email for resend functionality)
+            // 4. Open your new verification popup window modally
             using (OtpVerificationForm otpForm = new OtpVerificationForm(generatedOTP, otpExpiry, txtEmail.Text))
             {
                 otpForm.ShowDialog();
@@ -278,15 +299,47 @@ namespace PHISHALERT
                 // 5. Check if they successfully matched the code inside the form
                 if (otpForm.IsVerified)
                 {
-                    MessageBox.Show("Account created successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // --- DATABASE INTEGRATION START (SQL SERVER VERSION) ---
+                    string username = txtUsername.Text;
+                    string email = txtEmail.Text;
+                    string plainPassword = txtPassword.Text;
 
-                    // Navigate to the main application dashboard
-                    var mainForm = this.FindForm() as Form1;
-                    if (mainForm != null)
+                    // Hash the password securely using BCrypt
+                    string hash = BCrypt.Net.BCrypt.HashPassword(plainPassword);
+
+                    string connectionString = @"Server=(localdb)\MSSQLLocalDB;Database=PhishAlertDB;Trusted_Connection=True;";
+
+                    using (SqlConnection connection = new SqlConnection(connectionString))
                     {
-                        mainForm.SetLoggedIn(true);
-                        mainForm.ShowDashboard();
+                        connection.Open();
+                        // Modified to insert into both Username and Email columns
+                        string insertQuery = "INSERT INTO Users (Username, Email, PasswordHash) VALUES (@username, @email, @hash)";
+
+                        using (SqlCommand command = new SqlCommand(insertQuery, connection))
+                        {
+                            command.Parameters.AddWithValue("@username", username);
+                            command.Parameters.AddWithValue("@email", email);
+                            command.Parameters.AddWithValue("@hash", hash);
+
+                            try
+                            {
+                                command.ExecuteNonQuery();
+                                MessageBox.Show("Account created and saved successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                                var mainForm = this.FindForm() as Form1;
+                                if (mainForm != null)
+                                {
+                                    mainForm.SetLoggedIn(true);
+                                    mainForm.ShowDashboard();
+                                }
+                            }
+                            catch (SqlException ex) when (ex.Number == 2627) // Unique constraint violation index error
+                            {
+                                MessageBox.Show("Username or Email address already exists!", "Registration Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        }
                     }
+                    // --- DATABASE INTEGRATION END ---
                 }
                 else
                 {
@@ -304,11 +357,79 @@ namespace PHISHALERT
             }
         }
 
-
         private string GenerateOTP()
         {
             Random rnd = new Random();
             return rnd.Next(100000, 999999).ToString();
+        }
+
+        private bool IsValidEmail(string email)
+        {
+            try
+            {
+                // RFC 5322 simplified email validation regex
+                string emailPattern = @"^[^@\s]+@[^@\s]+\.[^@\s]+$";
+                if (!Regex.IsMatch(email, emailPattern))
+                    return false;
+
+                // Additional validation: check for valid domain
+                var emailParts = email.Split('@');
+                if (emailParts.Length != 2)
+                    return false;
+
+                string domain = emailParts[1].ToLower();
+
+                // Check for common typos in popular domains
+                string[] commonTypos = { "gmial.com", "gmai.com", "yahooo.com", "hotmil.com", "outlok.com" };
+                foreach (var typo in commonTypos)
+                {
+                    if (domain == typo)
+                        return false;
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsTestOrBlockedEmail(string email)
+        {
+            string emailLower = email.ToLower();
+
+            // Block test/example emails
+            string[] blockedEmails = 
+            { 
+                "phishalert.otp.test@gmail.com",
+                "test@test.com",
+                "example@example.com",
+                "admin@localhost",
+                "noreply@phishalert.com"
+            };
+
+            foreach (var blocked in blockedEmails)
+            {
+                if (emailLower == blocked)
+                    return true;
+            }
+
+            // Block disposable email domains
+            string[] disposableDomains = 
+            { 
+                "tempmail.com", "10minutemail.com", "guerrillamail.com", 
+                "maildrop.cc", "yopmail.com", "mailinator.com"
+            };
+
+            string domain = emailLower.Split('@')[1];
+            foreach (var disposable in disposableDomains)
+            {
+                if (domain == disposable)
+                    return true;
+            }
+
+            return false;
         }
 
         private void SendOTPEmail(string email, string otp)

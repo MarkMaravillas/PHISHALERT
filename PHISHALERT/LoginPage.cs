@@ -1,5 +1,7 @@
+using Microsoft.Data.SqlClient; // Added for SQL Server LocalDB connectivity
 using System;
 using System.Drawing;
+using System.Text.RegularExpressions; // For email validation
 using System.Windows.Forms;
 
 namespace PHISHALERT
@@ -169,12 +171,71 @@ namespace PHISHALERT
 
         private void btnLogin_Click(object sender, EventArgs e)
         {
-            // Mock authentication - set logged in state and navigate to dashboard
-            var mainForm = this.FindForm() as Form1;
-            if (mainForm != null)
+            string identifier = txtUsername.Text; // This text box handles username or email inputs
+            string enteredPassword = txtPassword.Text;
+
+            if (string.IsNullOrWhiteSpace(identifier) || string.IsNullOrWhiteSpace(enteredPassword))
             {
-                mainForm.SetLoggedIn(true);
-                mainForm.ShowDashboard();
+                MessageBox.Show("Please enter your credentials.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Validate if identifier appears to be an email, ensure it's valid format
+            if (identifier.Contains("@") && !IsValidEmail(identifier))
+            {
+                MessageBox.Show("Please enter a valid email address or username.", "Invalid Email Format", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string connectionString = @"Server=(localdb)\MSSQLLocalDB;Database=PhishAlertDB;Trusted_Connection=True;";
+
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                try
+                {
+                    connection.Open();
+
+                    // This query searches both the Username and Email columns for a match
+                    string selectQuery = "SELECT PasswordHash FROM Users WHERE Username = @identifier OR Email = @identifier";
+
+                    using (SqlCommand command = new SqlCommand(selectQuery, connection))
+                    {
+                        command.Parameters.AddWithValue("@identifier", identifier);
+
+                        using (SqlDataReader reader = command.ExecuteReader())
+                        {
+                            if (reader.Read()) // Matching credential found
+                            {
+                                string storedHash = reader.GetString(0);
+
+                                // Compare the plain-text login attempt against the hashed string
+                                if (BCrypt.Net.BCrypt.Verify(enteredPassword, storedHash))
+                                {
+                                    MessageBox.Show("Login Successful! Welcome back.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                                    var mainForm = this.FindForm() as Form1;
+                                    if (mainForm != null)
+                                    {
+                                        mainForm.SetLoggedIn(true);
+                                        mainForm.ShowDashboard();
+                                    }
+                                }
+                                else
+                                {
+                                    MessageBox.Show("Invalid credentials entered.", "Access Denied", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                }
+                            }
+                            else // No matching user profile
+                            {
+                                MessageBox.Show("Invalid credentials entered.", "Access Denied", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        }
+                    }
+                }
+                catch (SqlException ex)
+                {
+                    MessageBox.Show("Database error: " + ex.Message, "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 
@@ -185,6 +246,20 @@ namespace PHISHALERT
             if (mainForm != null)
             {
                 mainForm.ShowSignUp();
+            }
+        }
+
+        private bool IsValidEmail(string email)
+        {
+            try
+            {
+                // RFC 5322 simplified email validation regex
+                string emailPattern = @"^[^@\s]+@[^@\s]+\.[^@\s]+$";
+                return Regex.IsMatch(email, emailPattern);
+            }
+            catch
+            {
+                return false;
             }
         }
     }
