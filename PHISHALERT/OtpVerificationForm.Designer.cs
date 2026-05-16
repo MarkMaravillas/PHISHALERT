@@ -44,19 +44,21 @@
             // 
             this.btnResend.Location = new System.Drawing.Point(235, 174);
             this.btnResend.Name = "btnResend";
-            this.btnResend.Size = new System.Drawing.Size(75, 28);
+            this.btnResend.Size = new System.Drawing.Size(75, 44);
             this.btnResend.TabIndex = 1;
             this.btnResend.Text = "Resend";
             this.btnResend.UseVisualStyleBackColor = true;
+            this.btnResend.Click += new System.EventHandler(this.btnResend_Click);
             // 
             // btnVerify
             // 
             this.btnVerify.Location = new System.Drawing.Point(417, 174);
             this.btnVerify.Name = "btnVerify";
-            this.btnVerify.Size = new System.Drawing.Size(75, 28);
+            this.btnVerify.Size = new System.Drawing.Size(75, 44);
             this.btnVerify.TabIndex = 2;
             this.btnVerify.Text = "Verify";
             this.btnVerify.UseVisualStyleBackColor = true;
+            this.btnVerify.Click += new System.EventHandler(this.btnVerify_Click);
             // 
             // OtpVerificationForm
             // 
